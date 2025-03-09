@@ -15,6 +15,7 @@ from frigate.camera import CameraMetrics, PTZMetrics
 from frigate.comms.config_updater import ConfigSubscriber
 from frigate.comms.inter_process import InterProcessRequestor
 from frigate.config import CameraConfig, DetectConfig, ModelConfig
+from frigate.config.camera.motion import MotionMethodEnum
 from frigate.const import (
     CACHE_DIR,
     CACHE_SEGMENT_FORMAT,
@@ -23,6 +24,7 @@ from frigate.const import (
 from frigate.log import LogPipe
 from frigate.motion import MotionDetector
 from frigate.motion.improved_motion import ImprovedMotionDetector
+from frigate.motion.mog2_motion import MoG2Detector
 from frigate.object_detection import RemoteObjectDetector
 from frigate.ptz.autotrack import ptz_moving_at_frame_time
 from frigate.track import ObjectTracker
@@ -493,7 +495,14 @@ def track_camera(
     objects_to_track = config.objects.track
     object_filters = config.objects.filters
 
-    motion_detector = ImprovedMotionDetector(
+    # select the appropriate motion model based on the config
+    # defaults to improved ( 0.15 default )
+    if config.motion.method == MotionMethodEnum.mog2:
+        motion_method = MoG2Detector
+    else:
+        motion_method = ImprovedMotionDetector
+
+    motion_detector = motion_method(
         frame_shape,
         config.motion,
         config.detect.fps,
