@@ -15,7 +15,6 @@ class MotionMethodEnum(str, Enum):
     mog2 = "mog2"
     knn = "knn"
 
-
 class MotionConfig(FrigateBaseModel):
     enabled: bool = Field(default=True, title="Enable motion on all cameras.")
     method: MotionMethodEnum = Field(
