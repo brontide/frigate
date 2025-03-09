@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - dev
-      - master
+      - '*'
+      - '!dev'
+      - '!master'
     paths-ignore:
       - "docs/**"
 
