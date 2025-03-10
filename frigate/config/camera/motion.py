@@ -9,14 +9,18 @@ __all__ = ["MotionConfig",
            "MotionMethodEnum",
            ]
 
+
 class MotionMethodEnum(str, Enum):
     improved = "improved"
     mog2 = "mog2"
     knn = "knn"
 
+
 class MotionConfig(FrigateBaseModel):
     enabled: bool = Field(default=True, title="Enable motion on all cameras.")
-    method: MotionMethodEnum = Field(default=MotionMethodEnum.improved, title="Select motion tracking algorithm")
+    method: MotionMethodEnum = Field(
+        default=MotionMethodEnum.improved, title="Select motion tracking algorithm"
+    )
     threshold: int = Field(
         default=30,
         title="Motion detection threshold (1-255).",
