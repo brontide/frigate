@@ -23,8 +23,12 @@ from frigate.const import (
 )
 from frigate.log import LogPipe
 from frigate.motion import MotionDetector
+<<<<<<< HEAD
 from frigate.motion.improved_motion import ImprovedMotionDetector
 from frigate.motion.mog2_motion import MoG2Detector
+=======
+from frigate.motion.factory import motionFactory
+>>>>>>> 9109ed77 (Replace the direct call to instandiate the MotionDetector with a function that returns the instantiated detector.)
 from frigate.object_detection import RemoteObjectDetector
 from frigate.ptz.autotrack import ptz_moving_at_frame_time
 from frigate.track import ObjectTracker
@@ -495,14 +499,7 @@ def track_camera(
     objects_to_track = config.objects.track
     object_filters = config.objects.filters
 
-    # select the appropriate motion model based on the config
-    # defaults to improved ( 0.15 default )
-    if config.motion.method == MotionMethodEnum.mog2:
-        motion_method = MoG2Detector
-    else:
-        motion_method = ImprovedMotionDetector
-
-    motion_detector = motion_method(
+    motion_detector = motionFactory(
         frame_shape,
         config.motion,
         config.detect.fps,
