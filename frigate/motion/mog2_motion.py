@@ -34,7 +34,7 @@ class MoG2MotionDetector(MotionDetector):
         # MOG2 background subtractor (replaces avg_frame from improved_motion)
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=600,
-            varThreshold=14,
+            varThreshold=config.threshold,
             detectShadows=True
         )
 
@@ -79,11 +79,10 @@ class MoG2MotionDetector(MotionDetector):
                 )
             ]
 
-        # Use color frame for MOG2 (better discrimination than gray)
-        color_frame = frame[0 : self.frame_shape[0], 0 : self.frame_shape[1]]
+        gray = frame[0 : self.frame_shape[0], 0 : self.frame_shape[1]]
 
         resized_frame = cv2.resize(
-            color_frame,
+            gray,
             dsize=(self.motion_frame_size[1], self.motion_frame_size[0]),
             interpolation=self.interpolation,
         )
@@ -91,9 +90,8 @@ class MoG2MotionDetector(MotionDetector):
         if self.save_images:
             resized_saved = resized_frame.copy()
 
-        # Contrast improvement kept as option but disabled for MOG2
-        # (MOG2 handles illumination changes internally)
-        if self.config.improve_contrast and False:
+        # Contrast improvement: normalize per-channel before feeding MOG2
+        if self.config.improve_contrast:
             min_value = np.percentile(resized_frame, 4).astype(np.uint8)
             max_value = np.percentile(resized_frame, 96).astype(np.uint8)
             if min_value < max_value:
@@ -106,11 +104,12 @@ class MoG2MotionDetector(MotionDetector):
                 ).astype(np.uint8)
 
         # Apply MOG2 background subtraction
-        fg_mask = self.bg_subtractor.apply(resized_frame, learningRate=0.005)
+        # Use fast learning rate during calibration (matching improved_motion pattern)
+        learning_rate = self.config.delta_alpha if self.calibrating else self.config.frame_alpha
+        fg_mask = self.bg_subtractor.apply(resized_frame, learningRate=learning_rate)
 
         # Suppress near-white regions (headlights, reflections) from motion mask
-        frame_gray = resized_frame # cv2.cvtColor(resized_frame, cv2.COLOR_BGR2GRAY)
-        white_mask = cv2.threshold(frame_gray, 225, 255, cv2.THRESH_BINARY)[1]
+        white_mask = (resized_frame > 225).astype(np.uint8) * 255
         fg_mask[white_mask == 255] = 0
 
         # Apply spatial mask
@@ -160,8 +159,8 @@ class MoG2MotionDetector(MotionDetector):
             self.calibrating = True
             return []
 
-        # Cap boxes during overwhelming motion (rain, lightning, IR switch)
-        if pct_motion > getattr(self.config, 'lightning_threshold', 0.8):
+        # Cap boxes during overwhelming motion (rain, lightning, IR switch) and recalibrate
+        if pct_motion > self.config.lightning_threshold:
             motion_boxes = motion_boxes[:4]
             self.calibrating = True
 
@@ -216,7 +215,7 @@ class MoG2MotionDetector(MotionDetector):
 
     def update_mask(self) -> None:
         resized_mask = cv2.resize(
-            self.config.mask,
+            self.config.rasterized_mask,
             dsize=(self.motion_frame_size[1], self.motion_frame_size[0]),
             interpolation=cv2.INTER_AREA,
         )
