@@ -75,6 +75,29 @@ class MotionConfig(FrigateBaseModel):
         title="Original motion state",
         description="Indicates whether motion detection was enabled in the original static configuration.",
     )
+    region_multiplier: float = Field(
+        default=1.35,
+        title="Motion region multiplier",
+        description=(
+            "Expansion factor applied to motion bounding boxes when computing the "
+            "square region sent to the object detector. Lower values produce tighter "
+            "crops (object fills more of the frame); higher values add more context. "
+            "The default (1.35) matches the tracked-object region expansion. "
+            "Recommended range: 1.1–2.0."
+        ),
+        ge=1.0,
+        le=4.0,
+    )
+    use_motion_region_grid: bool = Field(
+        default=False,
+        title="Use motion region grid",
+        description=(
+            "When enabled, motion-derived detection regions are sized using the "
+            "historical region grid for that area of the frame. Disable (default) "
+            "to size regions purely from the motion bounding box and region_multiplier, "
+            "which works better with accurate motion detectors such as MOG2."
+        ),
+    )
     raw_mask: dict[str, Optional[MotionMaskConfig]] = Field(
         default_factory=dict, exclude=True
     )
