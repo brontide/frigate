@@ -5,7 +5,13 @@ from pydantic import Field
 
 from .base import FrigateBaseModel
 
-__all__ = ["TimeFormatEnum", "DateTimeStyleEnum", "UnitSystemEnum", "UIConfig"]
+__all__ = [
+    "TimeFormatEnum",
+    "DateTimeStyleEnum",
+    "UnitSystemEnum",
+    "InferenceThresholdConfig",
+    "UIConfig",
+]
 
 
 class TimeFormatEnum(str, Enum):
@@ -26,6 +32,19 @@ class UnitSystemEnum(str, Enum):
     metric = "metric"
 
 
+class InferenceThresholdConfig(FrigateBaseModel):
+    warning: int = Field(
+        default=50,
+        title="Warning threshold (ms)",
+        description="Inference speed in ms above which a warning is shown in the UI.",
+    )
+    error: int = Field(
+        default=100,
+        title="Error threshold (ms)",
+        description="Inference speed in ms above which an error is shown in the UI.",
+    )
+
+
 class UIConfig(FrigateBaseModel):
     timezone: Optional[str] = Field(default=None, title="Override UI timezone.")
     time_format: TimeFormatEnum = Field(
@@ -39,4 +58,9 @@ class UIConfig(FrigateBaseModel):
     )
     unit_system: UnitSystemEnum = Field(
         default=UnitSystemEnum.metric, title="The unit system to use for measurements."
+    )
+    inference_threshold: InferenceThresholdConfig = Field(
+        default_factory=InferenceThresholdConfig,
+        title="Inference threshold",
+        description="Thresholds for detector inference speed warnings in the UI.",
     )
