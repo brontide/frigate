@@ -44,6 +44,7 @@ from frigate.util.image import (
 )
 from frigate.util.object import (
     create_tensor_input,
+    deduplicate_regions,
     get_cluster_candidates,
     get_cluster_region,
     get_cluster_region_from_grid,
@@ -1040,6 +1041,8 @@ def process_frames(
                             candidate,
                             standalone_motion_boxes,
                             region_grid,
+                            multiplier=motion_detector.config.region_multiplier,
+                            use_grid=motion_detector.config.use_motion_region_grid,
                         )
                         for candidate in motion_clusters
                     ]
@@ -1052,6 +1055,9 @@ def process_frames(
                 ):
                     regions.append(region)
                 startup_scan = False
+
+            # remove regions fully covered by a larger region
+            regions = deduplicate_regions(regions)
 
             # resize regions and detect
             # seed with stationary objects

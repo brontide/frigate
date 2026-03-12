@@ -148,7 +148,9 @@ def get_camera_regions_grid(
     return grid
 
 
-def get_cluster_region_from_grid(frame_shape, min_region, cluster, boxes, region_grid):
+def get_cluster_region_from_grid(
+    frame_shape, min_region, cluster, boxes, region_grid, multiplier=2.0, use_grid=True
+):
     min_x = frame_shape[1]
     min_y = frame_shape[0]
     max_x = 0
@@ -159,7 +161,8 @@ def get_cluster_region_from_grid(frame_shape, min_region, cluster, boxes, region
         max_x = max(boxes[b][2], max_x)
         max_y = max(boxes[b][3], max_y)
     return get_region_from_grid(
-        frame_shape, [min_x, min_y, max_x, max_y], min_region, region_grid
+        frame_shape, [min_x, min_y, max_x, max_y], min_region, region_grid,
+        multiplier, use_grid=use_grid,
     )
 
 
@@ -168,11 +171,16 @@ def get_region_from_grid(
     cluster: list[int],
     min_region: int,
     region_grid: list[list[dict[str, Any]]],
+    multiplier: float = 2.0,
+    use_grid: bool = True,
 ) -> list[int]:
     """Get a region for a box based on the region grid."""
     box = calculate_region(
-        frame_shape, cluster[0], cluster[1], cluster[2], cluster[3], min_region
+        frame_shape, cluster[0], cluster[1], cluster[2], cluster[3], min_region,
+        multiplier=multiplier,
     )
+    if not use_grid:
+        return box
     centroid = (
         box[0] + (min(frame_shape[1], box[2]) - box[0]) / 2,
         box[1] + (min(frame_shape[0], box[3]) - box[1]) / 2,
@@ -210,6 +218,7 @@ def get_region_from_grid(
         min(frame_shape[1], centroid[0] + size / 2),
         min(frame_shape[0], centroid[1] + size / 2),
         min_region,
+        multiplier=multiplier,
     )
 
 
@@ -335,6 +344,29 @@ def reduce_boxes(boxes, iou_threshold=0.0):
             clusters.append(list(box))
 
     return [tuple(c) for c in clusters]
+
+
+def deduplicate_regions(regions, iou_threshold=0.85):
+    """Remove regions already covered by a larger region.
+
+    A region is dropped only when it is fully contained within a larger
+    already-kept region, or when its IoU with a larger region exceeds
+    iou_threshold (meaning the exclusive zone is negligible). This
+    guarantees no object visible in a dropped region is missed.
+    """
+    sorted_regions = sorted(
+        regions, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]), reverse=True
+    )
+    kept = []
+    for region in sorted_regions:
+        dominated = any(
+            box_inside(kept_region, region)
+            or intersection_over_union(region, kept_region) >= iou_threshold
+            for kept_region in kept
+        )
+        if not dominated:
+            kept.append(region)
+    return kept
 
 
 def average_boxes(boxes: list[list[int, int, int, int]]) -> list[int, int, int, int]:
