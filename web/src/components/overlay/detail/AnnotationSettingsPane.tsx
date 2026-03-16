@@ -14,7 +14,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { useDocDomain } from "@/hooks/use-doc-domain";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 
-const OFFSET_MIN = -2500;
+const OFFSET_MIN = -10000;
 const OFFSET_MAX = 2500;
 const OFFSET_STEP = 50;
 

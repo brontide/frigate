@@ -14,7 +14,7 @@ import { useIsAdmin } from "@/hooks/use-is-admin";
 import { useDocDomain } from "@/hooks/use-doc-domain";
 import { Link } from "react-router-dom";
 
-const OFFSET_MIN = -2500;
+const OFFSET_MIN = -10000;
 const OFFSET_MAX = 2500;
 const OFFSET_STEP = 50;
 
