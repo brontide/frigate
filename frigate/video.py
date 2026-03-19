@@ -29,7 +29,6 @@ from frigate.const import (
 )
 from frigate.log import LogPipe
 from frigate.motion import MotionDetector
-from frigate.motion.improved_motion import ImprovedMotionDetector
 from frigate.motion.mog2_motion import MoG2MotionDetector
 from frigate.object_detection.base import RemoteObjectDetector
 from frigate.ptz.autotrack import ptz_moving_at_frame_time
@@ -40,7 +39,9 @@ from frigate.util.builtin import EventsPerSecond
 from frigate.util.image import (
     FrameManager,
     SharedMemoryFrameManager,
+    area,
     draw_box_with_label,
+    intersection_over_union,
 )
 from frigate.util.object import (
     create_tensor_input,
@@ -50,7 +51,6 @@ from frigate.util.object import (
     get_cluster_region_from_grid,
     get_min_region_size,
     get_startup_regions,
-    inside_any,
     intersects_any,
     is_object_filtered,
     reduce_detections,
@@ -868,6 +868,17 @@ def process_frames(
     stationary_frame_counter = 0
     camera_enabled = True
 
+    # adaptive throttling state (congestion control)
+    throttle_level = 0
+    throttle_expiry = 0.0
+    THROTTLE_DURATION = 5.0
+    # motion region caps per (throttle_level, priority) — None means unlimited
+    THROTTLE_CAPS: dict[int, dict[int, int | None]] = {
+        1: {1: 2, 2: 4, 3: None},
+        2: {1: 1, 2: 2, 3: 4},
+        3: {1: 0, 2: 1, 3: 2},
+    }
+
     region_min_size = get_min_region_size(model_config)
 
     attributes_map = model_config.attributes_map
@@ -961,6 +972,32 @@ def process_frames(
         # look for motion if enabled
         motion_boxes = motion_detector.detect(frame)
 
+        # update adaptive throttle level based on output queue congestion
+        queue_full = detected_objects_queue.full()
+        if queue_full:
+            if throttle_level == 0:
+                throttle_level = 1
+                logger.debug(f"{camera_config.name}: throttle activated (level 1)")
+            elif frame_time >= throttle_expiry:
+                throttle_level = min(throttle_level + 1, 3)
+                logger.debug(
+                    f"{camera_config.name}: throttle escalated to level {throttle_level}"
+                )
+            throttle_expiry = frame_time + THROTTLE_DURATION
+        elif throttle_level > 0 and frame_time >= throttle_expiry:
+            throttle_level -= 1
+            logger.debug(
+                f"{camera_config.name}: throttle relaxed to level {throttle_level}"
+            )
+            if throttle_level > 0:
+                throttle_expiry = frame_time + THROTTLE_DURATION
+
+        # at high throttle with full queue, skip detection entirely for this frame
+        if queue_full and throttle_level >= 2:
+            object_tracker.update_frame_times(frame_name, frame_time)
+            frame_manager.close(frame_name)
+            continue
+
         regions = []
         consolidated_detections = []
 
@@ -1007,14 +1044,16 @@ def process_frames(
             object_boxes = tracked_object_boxes + object_tracker.untracked_object_boxes
 
             # get consolidated regions for tracked objects
+            tracked_region_clusters = get_cluster_candidates(
+                frame_shape, region_min_size, object_boxes
+            )
             regions = [
                 get_cluster_region(
                     frame_shape, region_min_size, candidate, object_boxes
                 )
-                for candidate in get_cluster_candidates(
-                    frame_shape, region_min_size, object_boxes
-                )
+                for candidate in tracked_region_clusters
             ]
+            num_tracked_regions = len(regions)
 
             # only add in the motion boxes when not calibrating and a ptz is not moving via autotracking
             # ptz_moving_at_frame_time() always returns False for non-autotracking cameras
@@ -1023,9 +1062,11 @@ def process_frames(
                 ptz_metrics.start_time.value,
                 ptz_metrics.stop_time.value,
             ):
-                # find motion boxes that are not inside tracked object regions
+                # find motion boxes that don't significantly overlap tracked object regions
                 standalone_motion_boxes = [
-                    b for b in motion_boxes if not inside_any(b, regions)
+                    b
+                    for b in motion_boxes
+                    if not any(intersection_over_union(b, r) > 0.3 for r in regions)
                 ]
 
                 if standalone_motion_boxes:
@@ -1034,8 +1075,10 @@ def process_frames(
                         region_min_size,
                         standalone_motion_boxes,
                     )
-                    motion_regions = [
-                        get_cluster_region_from_grid(
+                    # score each cluster by total motion area for prioritization
+                    scored_motion = []
+                    for candidate in motion_clusters:
+                        region = get_cluster_region_from_grid(
                             frame_shape,
                             region_min_size,
                             candidate,
@@ -1044,8 +1087,14 @@ def process_frames(
                             multiplier=motion_detector.config.region_multiplier,
                             use_grid=motion_detector.config.use_motion_region_grid,
                         )
-                        for candidate in motion_clusters
-                    ]
+                        motion_score = sum(
+                            area(standalone_motion_boxes[i]) for i in candidate
+                        )
+                        scored_motion.append((motion_score, region))
+                    # sort by motion area descending so the most significant
+                    # motion regions are kept when budget is applied
+                    scored_motion.sort(key=lambda x: x[0], reverse=True)
+                    motion_regions = [r for _, r in scored_motion]
                     regions += motion_regions
 
             # if starting up, get the next startup scan region
@@ -1055,6 +1104,54 @@ def process_frames(
                 ):
                     regions.append(region)
                 startup_scan = False
+
+            # enforce region budget before deduplication:
+            # tracked-object regions are always kept, cap only affects motion
+            motion_cap = None  # None = unlimited
+
+            # apply hard cap from config if set
+            if camera_config.detect.max_regions is not None:
+                motion_cap = camera_config.detect.max_regions
+
+            # apply adaptive throttle cap if active
+            if throttle_level > 0:
+                priority = camera_config.priority
+                throttle_cap = THROTTLE_CAPS.get(throttle_level, {}).get(priority)
+
+                # activity boost: cameras actively tracking objects get one
+                # level less restriction (tracked regions are already guaranteed,
+                # this boosts their motion region budget)
+                has_active_tracking = any(
+                    obj["motionless_count"] < camera_config.detect.stationary.threshold
+                    and object_tracker.disappeared[obj["id"]] == 0
+                    for obj in object_tracker.tracked_objects.values()
+                )
+                if has_active_tracking and priority >= 2:
+                    boosted_level = max(0, throttle_level - 1)
+                    if boosted_level == 0:
+                        throttle_cap = None
+                    else:
+                        throttle_cap = THROTTLE_CAPS.get(boosted_level, {}).get(
+                            priority
+                        )
+
+                # use the more restrictive of hard cap and throttle cap
+                if throttle_cap is not None:
+                    if motion_cap is None:
+                        motion_cap = throttle_cap
+                    else:
+                        motion_cap = min(motion_cap, throttle_cap)
+
+            if (
+                motion_cap is not None
+                and len(regions) > num_tracked_regions + motion_cap
+            ):
+                total_before = len(regions)
+                regions = regions[: num_tracked_regions + motion_cap]
+                logger.info(
+                    f"{camera_config.name}: capped motion regions from {total_before - num_tracked_regions} to {motion_cap} "
+                    f"(tracked: {num_tracked_regions}, throttle: {throttle_level})"
+                )
 
             # remove regions fully covered by a larger region
             regions = deduplicate_regions(regions)

@@ -169,6 +169,13 @@ class CameraConfig(FrigateBaseModel):
         title="ONVIF",
         description="ONVIF connection and PTZ autotracking settings for this camera.",
     )
+    priority: int = Field(
+        default=2,
+        title="Detection priority",
+        description="Detection scheduling priority (1=low, 2=normal, 3=high). Higher priority cameras are throttled less aggressively when the detector is under load.",
+        ge=1,
+        le=3,
+    )
     type: CameraTypeEnum = Field(
         default=CameraTypeEnum.generic,
         title="Camera type",

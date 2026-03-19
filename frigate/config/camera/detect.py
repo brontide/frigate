@@ -82,6 +82,12 @@ class DetectConfig(FrigateBaseModel):
         title="Stationary objects config",
         description="Settings to detect and manage objects that remain stationary for a period of time.",
     )
+    max_regions: Optional[int] = Field(
+        default=None,
+        title="Maximum detection regions",
+        description="Hard cap on the number of motion-only regions sent to the detector per frame. Regions for actively tracked objects are always detected in addition to this limit. When None, no static limit is applied (adaptive throttling still applies under load).",
+        ge=1,
+    )
     annotation_offset: int = Field(
         default=0,
         title="Annotation offset",
