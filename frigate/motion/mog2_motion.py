@@ -2,6 +2,7 @@ import logging
 
 import cv2
 import numpy as np
+
 from frigate.camera import PTZMetrics
 from frigate.config import MotionConfig
 from frigate.motion import MotionDetector
@@ -33,9 +34,7 @@ class MoG2MotionDetector(MotionDetector):
 
         # MOG2 background subtractor (replaces avg_frame from improved_motion)
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=600,
-            varThreshold=config.threshold,
-            detectShadows=True
+            history=600, varThreshold=config.threshold, detectShadows=True
         )
 
         self.frame_counter = 0
@@ -95,8 +94,13 @@ class MoG2MotionDetector(MotionDetector):
             min_value = np.percentile(resized_frame, 4).astype(np.uint8)
             max_value = np.percentile(resized_frame, 96).astype(np.uint8)
             if min_value < max_value:
-                self.contrast_values[self.contrast_values_index] = [min_value, max_value]
-                self.contrast_values_index = (self.contrast_values_index + 1) % len(self.contrast_values)
+                self.contrast_values[self.contrast_values_index] = [
+                    min_value,
+                    max_value,
+                ]
+                self.contrast_values_index = (self.contrast_values_index + 1) % len(
+                    self.contrast_values
+                )
                 avg_min, avg_max = np.mean(self.contrast_values, axis=0)
                 resized_frame = np.clip(resized_frame, avg_min, avg_max)
                 resized_frame = (
@@ -105,7 +109,9 @@ class MoG2MotionDetector(MotionDetector):
 
         # Apply MOG2 background subtraction
         # Use fast learning rate during calibration (matching improved_motion pattern)
-        learning_rate = self.config.delta_alpha if self.calibrating else self.config.frame_alpha
+        learning_rate = (
+            self.config.delta_alpha if self.calibrating else self.config.frame_alpha
+        )
         fg_mask = self.bg_subtractor.apply(resized_frame, learningRate=learning_rate)
 
         # Suppress near-white regions (headlights, reflections) from motion mask
@@ -123,9 +129,7 @@ class MoG2MotionDetector(MotionDetector):
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-        contours = cv2.findContours(
-            thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        contours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contours = grab_cv2_contours(contours)
 
         # Sort largest first, cap at 10 to bound processing
@@ -152,7 +156,7 @@ class MoG2MotionDetector(MotionDetector):
 
         # Scene change / lightning threshold — suppress and recalibrate
         if (
-            hasattr(self.config, 'skip_motion_threshold')
+            hasattr(self.config, "skip_motion_threshold")
             and self.config.skip_motion_threshold is not None
             and pct_motion > self.config.skip_motion_threshold
         ):
@@ -223,9 +227,7 @@ class MoG2MotionDetector(MotionDetector):
 
         # Reset background model when mask changes so it relearns the new scene
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=600,
-            varThreshold=14,
-            detectShadows=True
+            history=600, varThreshold=14, detectShadows=True
         )
         self.calibrating = True
         self.motion_frame_count = 0
