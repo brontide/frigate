@@ -161,8 +161,12 @@ def get_cluster_region_from_grid(
         max_x = max(boxes[b][2], max_x)
         max_y = max(boxes[b][3], max_y)
     return get_region_from_grid(
-        frame_shape, [min_x, min_y, max_x, max_y], min_region, region_grid,
-        multiplier, use_grid=use_grid,
+        frame_shape,
+        [min_x, min_y, max_x, max_y],
+        min_region,
+        region_grid,
+        multiplier,
+        use_grid=use_grid,
     )
 
 
@@ -176,7 +180,12 @@ def get_region_from_grid(
 ) -> list[int]:
     """Get a region for a box based on the region grid."""
     box = calculate_region(
-        frame_shape, cluster[0], cluster[1], cluster[2], cluster[3], min_region,
+        frame_shape,
+        cluster[0],
+        cluster[1],
+        cluster[2],
+        cluster[3],
+        min_region,
         multiplier=multiplier,
     )
     if not use_grid:
@@ -433,13 +442,13 @@ def get_cluster_candidates(frame_shape, min_region, boxes):
     # determined by the max_region size minus half the box + 20%
     # TODO: see if we can do this with numpy
     cluster_candidates = []
-    used_boxes = []
+    used_boxes: set[int] = set()
     # loop over each box
     for current_index, b in enumerate(boxes):
         if current_index in used_boxes:
             continue
         cluster = [current_index]
-        used_boxes.append(current_index)
+        used_boxes.add(current_index)
         cluster_boundary = get_cluster_boundary(b, min_region)
         # find all other boxes that fit inside the boundary
         for compare_index, compare_box in enumerate(boxes):
@@ -468,7 +477,7 @@ def get_cluster_candidates(frame_shape, min_region, boxes):
 
             if should_cluster:
                 cluster.append(compare_index)
-                used_boxes.append(compare_index)
+                used_boxes.add(compare_index)
         cluster_candidates.append(cluster)
 
     # return the unique clusters only
