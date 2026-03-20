@@ -44,6 +44,7 @@ from frigate.util.image import (
     intersection_over_union,
 )
 from frigate.util.object import (
+    box_inside,
     create_tensor_input,
     deduplicate_regions,
     get_cluster_candidates,
@@ -1095,6 +1096,27 @@ def process_frames(
                     # motion regions are kept when budget is applied
                     scored_motion.sort(key=lambda x: x[0], reverse=True)
                     motion_regions = [r for _, r in scored_motion]
+
+                    # merge motion regions that largely duplicate a tracked object region:
+                    # keep the larger of the two so detection coverage is maximised
+                    merged_motion = []
+                    for mr in motion_regions:
+                        merged = False
+                        for i, tr in enumerate(regions[:num_tracked_regions]):
+                            if intersection_over_union(mr, tr) > 0.5 or box_inside(
+                                tr, mr
+                            ):
+                                # replace tracked region with the larger region
+                                mr_area = (mr[2] - mr[0]) * (mr[3] - mr[1])
+                                tr_area = (tr[2] - tr[0]) * (tr[3] - tr[1])
+                                if mr_area > tr_area:
+                                    regions[i] = mr
+                                merged = True
+                                break
+                        if not merged:
+                            merged_motion.append(mr)
+                    motion_regions = merged_motion
+
                     regions += motion_regions
 
             # if starting up, get the next startup scan region
