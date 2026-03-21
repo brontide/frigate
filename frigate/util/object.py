@@ -148,7 +148,15 @@ def get_camera_regions_grid(
     return grid
 
 
-def get_cluster_region_from_grid(frame_shape, min_region, cluster, boxes, region_grid):
+def get_cluster_region_from_grid(
+    frame_shape,
+    min_region,
+    cluster,
+    boxes,
+    region_grid,
+    multiplier=2.0,
+    use_grid=True,
+):
     min_x = frame_shape[1]
     min_y = frame_shape[0]
     max_x = 0
@@ -159,7 +167,12 @@ def get_cluster_region_from_grid(frame_shape, min_region, cluster, boxes, region
         max_x = max(boxes[b][2], max_x)
         max_y = max(boxes[b][3], max_y)
     return get_region_from_grid(
-        frame_shape, [min_x, min_y, max_x, max_y], min_region, region_grid
+        frame_shape,
+        [min_x, min_y, max_x, max_y],
+        min_region,
+        region_grid,
+        multiplier,
+        use_grid=use_grid,
     )
 
 
@@ -168,11 +181,21 @@ def get_region_from_grid(
     cluster: list[int],
     min_region: int,
     region_grid: list[list[dict[str, Any]]],
+    multiplier: float = 2.0,
+    use_grid: bool = True,
 ) -> list[int]:
     """Get a region for a box based on the region grid."""
     box = calculate_region(
-        frame_shape, cluster[0], cluster[1], cluster[2], cluster[3], min_region
+        frame_shape,
+        cluster[0],
+        cluster[1],
+        cluster[2],
+        cluster[3],
+        min_region,
+        multiplier=multiplier,
     )
+    if not use_grid:
+        return box
     centroid = (
         box[0] + (min(frame_shape[1], box[2]) - box[0]) / 2,
         box[1] + (min(frame_shape[0], box[3]) - box[1]) / 2,
@@ -210,6 +233,7 @@ def get_region_from_grid(
         min(frame_shape[1], centroid[0] + size / 2),
         min(frame_shape[0], centroid[1] + size / 2),
         min_region,
+        multiplier=multiplier,
     )
 
 
@@ -267,19 +291,30 @@ def is_object_filtered(obj, objects_to_track, object_filters):
     return False
 
 
-def get_min_region_size(model_config: ModelConfig) -> int:
-    """Get the min region size."""
+def get_min_region_size(
+    model_config: ModelConfig, minimum_region: str | int = "auto"
+) -> int:
+    """Get the min region size.
+
+    minimum_region controls behaviour:
+      "auto"   – upstream default (half model size for >320px models)
+      "native" – always use full model size
+      <int>    – fixed pixel value, aligned to a multiple of 4
+    """
     largest_dimension = max(model_config.height, model_config.width)
 
-    if largest_dimension > 320:
-        # We originally tested allowing any model to have a region down to half of the model size
-        # but this led to many false positives. In this case we specifically target larger models
-        # which can benefit from a smaller region in some cases to detect smaller objects.
-        half = int(largest_dimension / 2)
+    if isinstance(minimum_region, int):
+        # fixed size, align to 4
+        return int((minimum_region + 3) / 4) * 4
 
+    if minimum_region == "native":
+        return largest_dimension
+
+    # "auto" — upstream logic
+    if largest_dimension > 320:
+        half = int(largest_dimension / 2)
         if half % 4 == 0:
             return half
-
         return int((half + 3) / 4) * 4
 
     return largest_dimension
@@ -335,6 +370,28 @@ def reduce_boxes(boxes, iou_threshold=0.0):
             clusters.append(list(box))
 
     return [tuple(c) for c in clusters]
+
+
+def deduplicate_regions(regions, iou_threshold=0.85):
+    """Remove regions already covered by a larger region.
+
+    A region is dropped when it is fully contained within a larger
+    already-kept region, or when its IoU with a larger region exceeds
+    iou_threshold (meaning the exclusive zone is negligible).
+    """
+    sorted_regions = sorted(
+        regions, key=lambda r: (r[2] - r[0]) * (r[3] - r[1]), reverse=True
+    )
+    kept = []
+    for region in sorted_regions:
+        dominated = any(
+            box_inside(kept_region, region)
+            or intersection_over_union(region, kept_region) >= iou_threshold
+            for kept_region in kept
+        )
+        if not dominated:
+            kept.append(region)
+    return kept
 
 
 def average_boxes(boxes: list[list[int, int, int, int]]) -> list[int, int, int, int]:
@@ -401,13 +458,13 @@ def get_cluster_candidates(frame_shape, min_region, boxes):
     # determined by the max_region size minus half the box + 20%
     # TODO: see if we can do this with numpy
     cluster_candidates = []
-    used_boxes = []
+    used_boxes: set[int] = set()
     # loop over each box
     for current_index, b in enumerate(boxes):
         if current_index in used_boxes:
             continue
         cluster = [current_index]
-        used_boxes.append(current_index)
+        used_boxes.add(current_index)
         cluster_boundary = get_cluster_boundary(b, min_region)
         # find all other boxes that fit inside the boundary
         for compare_index, compare_box in enumerate(boxes):
@@ -436,7 +493,7 @@ def get_cluster_candidates(frame_shape, min_region, boxes):
 
             if should_cluster:
                 cluster.append(compare_index)
-                used_boxes.append(compare_index)
+                used_boxes.add(compare_index)
         cluster_candidates.append(cluster)
 
     # return the unique clusters only

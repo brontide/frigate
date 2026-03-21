@@ -33,6 +33,16 @@ class MotionConfig(FrigateBaseModel):
     delta_alpha: float = Field(default=0.2, title="Delta Alpha")
     frame_alpha: float = Field(default=0.01, title="Frame Alpha")
     frame_height: Optional[int] = Field(default=100, title="Frame Height")
+    region_multiplier: float = Field(
+        default=1.35,
+        title="Expansion factor for motion regions sent to detector (1.0-4.0).",
+        ge=1.0,
+        le=4.0,
+    )
+    use_motion_region_grid: bool = Field(
+        default=True,
+        title="Size motion regions using the historical region grid.",
+    )
     mask: Union[str, list[str]] = Field(
         default="", title="Coordinates polygon for the motion mask."
     )

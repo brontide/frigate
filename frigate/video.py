@@ -38,16 +38,19 @@ from frigate.util.builtin import EventsPerSecond
 from frigate.util.image import (
     FrameManager,
     SharedMemoryFrameManager,
+    area,
     draw_box_with_label,
+    intersection_over_union,
 )
 from frigate.util.object import (
+    box_inside,
     create_tensor_input,
+    deduplicate_regions,
     get_cluster_candidates,
     get_cluster_region,
     get_cluster_region_from_grid,
     get_min_region_size,
     get_startup_regions,
-    inside_any,
     intersects_any,
     is_object_filtered,
     reduce_detections,
@@ -758,7 +761,9 @@ def process_frames(
     stationary_frame_counter = 0
     camera_enabled = True
 
-    region_min_size = get_min_region_size(model_config)
+    region_min_size = get_min_region_size(
+        model_config, camera_config.detect.minimum_region
+    )
 
     attributes_map = model_config.attributes_map
     all_attributes = model_config.all_attributes
@@ -896,15 +901,17 @@ def process_frames(
             ]
             object_boxes = tracked_object_boxes + object_tracker.untracked_object_boxes
 
-            # get consolidated regions for tracked objects
+            # get consolidated regions for tracked objects (always prioritized)
+            tracked_region_clusters = get_cluster_candidates(
+                frame_shape, region_min_size, object_boxes
+            )
             regions = [
                 get_cluster_region(
                     frame_shape, region_min_size, candidate, object_boxes
                 )
-                for candidate in get_cluster_candidates(
-                    frame_shape, region_min_size, object_boxes
-                )
+                for candidate in tracked_region_clusters
             ]
+            num_tracked_regions = len(regions)
 
             # only add in the motion boxes when not calibrating and a ptz is not moving via autotracking
             # ptz_moving_at_frame_time() always returns False for non-autotracking cameras
@@ -913,9 +920,11 @@ def process_frames(
                 ptz_metrics.start_time.value,
                 ptz_metrics.stop_time.value,
             ):
-                # find motion boxes that are not inside tracked object regions
+                # find motion boxes that don't significantly overlap tracked object regions
                 standalone_motion_boxes = [
-                    b for b in motion_boxes if not inside_any(b, regions)
+                    b
+                    for b in motion_boxes
+                    if not any(intersection_over_union(b, r) > 0.3 for r in regions)
                 ]
 
                 if standalone_motion_boxes:
@@ -924,17 +933,44 @@ def process_frames(
                         region_min_size,
                         standalone_motion_boxes,
                     )
-                    motion_regions = [
-                        get_cluster_region_from_grid(
+                    # score each cluster by total motion area for prioritization
+                    scored_motion = []
+                    for candidate in motion_clusters:
+                        region = get_cluster_region_from_grid(
                             frame_shape,
                             region_min_size,
                             candidate,
                             standalone_motion_boxes,
                             region_grid,
+                            multiplier=camera_config.motion.region_multiplier,
+                            use_grid=camera_config.motion.use_motion_region_grid,
                         )
-                        for candidate in motion_clusters
-                    ]
-                    regions += motion_regions
+                        motion_score = sum(
+                            area(standalone_motion_boxes[i]) for i in candidate
+                        )
+                        scored_motion.append((motion_score, region))
+                    # sort by motion area descending so most significant regions come first
+                    scored_motion.sort(key=lambda x: x[0], reverse=True)
+                    motion_regions = [r for _, r in scored_motion]
+
+                    # merge motion regions that largely duplicate a tracked object region:
+                    # keep the larger of the two so detection coverage is maximised
+                    merged_motion = []
+                    for mr in motion_regions:
+                        merged = False
+                        for i, tr in enumerate(regions[:num_tracked_regions]):
+                            if intersection_over_union(mr, tr) > 0.5 or box_inside(
+                                tr, mr
+                            ):
+                                mr_area = (mr[2] - mr[0]) * (mr[3] - mr[1])
+                                tr_area = (tr[2] - tr[0]) * (tr[3] - tr[1])
+                                if mr_area > tr_area:
+                                    regions[i] = mr
+                                merged = True
+                                break
+                        if not merged:
+                            merged_motion.append(mr)
+                    regions += merged_motion
 
             # if starting up, get the next startup scan region
             if startup_scan:
@@ -943,6 +979,9 @@ def process_frames(
                 ):
                     regions.append(region)
                 startup_scan = False
+
+            # remove regions fully covered by a larger region
+            regions = deduplicate_regions(regions)
 
             # resize regions and detect
             # seed with stationary objects

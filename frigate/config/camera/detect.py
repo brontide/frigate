@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import Field
 
@@ -60,4 +60,8 @@ class DetectConfig(FrigateBaseModel):
     )
     annotation_offset: int = Field(
         default=0, title="Milliseconds to offset detect annotations by."
+    )
+    minimum_region: Union[str, int] = Field(
+        default="auto",
+        title="Minimum region size: 'auto', 'native', or a pixel value.",
     )
