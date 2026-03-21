@@ -18,6 +18,4 @@ def create_motion_detector(
         "mog2": MoG2MotionDetector,
     }
     detector_class = methods.get(config.method.value, ImprovedMotionDetector)
-    return detector_class(
-        frame_shape, config, fps, name=name, ptz_metrics=ptz_metrics
-    )
+    return detector_class(frame_shape, config, fps, name=name, ptz_metrics=ptz_metrics)

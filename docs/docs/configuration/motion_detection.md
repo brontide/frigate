@@ -105,3 +105,33 @@ Lightning threshold does not stop motion based recordings from being saved.
 :::
 
 Large changes in motion like PTZ moves and camera switches between Color and IR mode should result in a pause in object detection. This is done via the `lightning_threshold` configuration. It is defined as the percentage of the image used to detect lightning or other substantial changes where motion detection needs to recalibrate. Increasing this value will make motion detection more likely to consider lightning or IR mode changes as valid motion. Decreasing this value will make motion detection more likely to ignore large amounts of motion such as a person approaching a doorbell camera.
+
+## Motion Detection Method
+
+Frigate supports pluggable motion detection methods via the `method` config option.
+
+### Improved (default)
+
+The default `improved` method uses frame differencing with an exponential moving average background model. It works well at the default `frame_height` of 100 and is the most tested option.
+
+### MOG2 (Gaussian Mixture Model)
+
+The `mog2` method uses OpenCV's MOG2 background subtractor, which maintains a per-pixel Gaussian mixture model. It can be more robust to gradual lighting changes and dynamic backgrounds (swaying trees, water, etc.).
+
+```yaml
+motion:
+  method: mog2
+```
+
+When using MOG2:
+
+- **`frame_alpha`** controls the background model history: `history = 1 / frame_alpha`. The default `frame_alpha: 0.01` gives a history of 100 frames.
+- **`contour_area`** is automatically scaled based on `frame_height` relative to 100px. If you increase `frame_height` to 300, a `contour_area` of 10 is internally treated as 90. This means you do not need to manually adjust `contour_area` when changing `frame_height`.
+- **`threshold`** maps to MOG2's `varThreshold` parameter.
+- All other motion settings (masks, `improve_contrast`, `lightning_threshold`) work the same as with the improved method.
+
+:::note
+
+Changing `method` requires a restart of the camera process to take effect. Runtime config changes update parameters on the active detector but do not switch between methods.
+
+:::

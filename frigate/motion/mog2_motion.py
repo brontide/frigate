@@ -52,7 +52,9 @@ class MoG2MotionDetector(MotionDetector):
 
         # Auto-scale contour_area relative to a 100px reference height.
         # At frame_height=100 this is 1.0x; at 300px it becomes 9.0x.
-        self.scaled_contour_area = config.contour_area * (config.frame_height / 100) ** 2
+        self.scaled_contour_area = (
+            config.contour_area * (config.frame_height / 100) ** 2
+        )
 
         # Contrast adjustment tracking
         self.contrast_values = np.zeros((contrast_frame_history, 2), np.uint8)

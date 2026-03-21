@@ -454,6 +454,11 @@ motion:
   #       setting this to False and leaving detect enabled
   #       will result in an error on startup.
   enabled: False
+  # Optional: Motion detection method (default: shown below)
+  # Options: improved (frame differencing, default), mog2 (Gaussian Mixture-based background subtraction)
+  # When using mog2, frame_alpha derives the background model history and contour_area is
+  # automatically scaled based on frame_height relative to 100px.
+  method: improved
   # Optional: The threshold passed to cv2.threshold to determine if a pixel is different enough to be counted as motion. (default: shown below)
   # Increasing this value will make motion detection less sensitive and decreasing it will make motion detection more sensitive.
   # The value should be between 1 and 255.
