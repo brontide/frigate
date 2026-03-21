@@ -329,6 +329,10 @@ detect:
   #      tracked objects, this makes it easy to tune.
   # WARNING: Fast moving objects will likely not have the bounding box align.
   annotation_offset: 0
+  # Optional: Minimum region size sent to detector (default: shown below)
+  # Options: 'auto' (half model size for >320px, full otherwise), 'native' (always full model size),
+  # or a fixed pixel value (aligned to multiple of 4).
+  minimum_region: auto
 
 # Optional: Object configuration
 # NOTE: Can be overridden at the camera level
@@ -493,6 +497,12 @@ motion:
   # Enables dynamic contrast improvement. This should help improve night detections at the cost of making motion detection more sensitive
   # for daytime.
   improve_contrast: True
+  # Optional: Expansion factor for motion regions sent to detector (default: shown below)
+  # Lower values produce tighter crops; higher values add more context around motion.
+  region_multiplier: 1.35
+  # Optional: Use the historical region grid to size motion regions (default: shown below)
+  # When false, regions are sized purely from the motion bounding box and region_multiplier.
+  use_motion_region_grid: true
   # Optional: Delay when updating camera motion through MQTT from ON -> OFF (default: shown below).
   mqtt_off_delay: 30
 
