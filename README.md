@@ -1,3 +1,34 @@
+> **This is an unofficial fork of Frigate NVR. It is not affiliated with, endorsed by, or associated with Frigate, Inc. in any way. "Frigate" and the Frigate logo are trademarks of Frigate, Inc.**
+
+# Meadow-View — Motion & Region Enhancements for Frigate
+
+This fork adds pluggable motion detection and configurable region handling on top of upstream Frigate. All new options are opt-in; the defaults match upstream behaviour.
+
+## MOG2 Motion Detection
+
+An alternative motion detector based on OpenCV's MOG2 background subtractor. MOG2 is especially good at suppressing hard shadows and wind-blown leaves, which means `threshold` can usually come down compared to the default `improved` method.
+
+Recommended starting point:
+
+```yaml
+motion:
+  method: mog2
+  frame_height: 300
+  use_motion_region_grid: false
+```
+
+Other settings (`threshold`, `contour_area`, `improve_contrast`, `frame_alpha`) should be tuned to taste after reviewing both daytime and nighttime footage.
+
+## Minimum Region Size
+
+Set `minimum_region: native` under `detect:` to always use the full model input size as the smallest detection region. This is recommended for models with strong small-object detection such as YOLO26 with STAL, where the upstream `auto` logic (which halves the region for models > 320px) would discard useful context.
+
+## Region Merging
+
+Motion regions are now scored by motion area and sorted so the most significant regions are processed first. Overlapping motion and tracked-object regions are aggressively merged, and a deduplication pass removes any region already covered by a larger one. This reduces redundant detector invocations without sacrificing coverage.
+
+---
+
 <p align="center">
   <img align="center" alt="logo" src="docs/static/img/branding/frigate.png">
 </p>
