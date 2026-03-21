@@ -1,14 +1,24 @@
+from enum import Enum
 from typing import Any, Optional, Union
 
 from pydantic import Field, field_serializer
 
 from ..base import FrigateBaseModel
 
-__all__ = ["MotionConfig"]
+__all__ = ["MotionConfig", "MotionMethodEnum"]
+
+
+class MotionMethodEnum(str, Enum):
+    improved = "improved"
+    mog2 = "mog2"
 
 
 class MotionConfig(FrigateBaseModel):
     enabled: bool = Field(default=True, title="Enable motion on all cameras.")
+    method: MotionMethodEnum = Field(
+        default=MotionMethodEnum.improved,
+        title="Motion detection method (improved or mog2).",
+    )
     threshold: int = Field(
         default=30,
         title="Motion detection threshold (1-255).",
