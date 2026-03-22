@@ -32,6 +32,21 @@ from .util import tensor_transform
 logger = logging.getLogger(__name__)
 
 
+def _maybe_init_pool(
+    free_slots_queue, pool_init_lock, pool_initialized, num_pool_slots
+):
+    """First detector to finish loading populates the shared slot pool."""
+    if free_slots_queue is None or pool_init_lock is None:
+        return
+    with pool_init_lock:
+        if pool_initialized.value:
+            return
+        pool_initialized.value = True
+        for i in range(num_pool_slots):
+            free_slots_queue.put(i)
+        logger.info(f"Detection pool ready: {num_pool_slots} slots available")
+
+
 class ObjectDetector(ABC):
     @abstractmethod
     def detect(self, tensor_input, threshold: float = 0.4):
@@ -121,6 +136,10 @@ class DetectorRunner(FrigateProcess):
         config: FrigateConfig,
         detector_config: BaseDetectorConfig,
         stop_event: MpEvent,
+        free_slots_queue=None,
+        pool_init_lock=None,
+        pool_initialized=None,
+        num_pool_slots: int = 0,
     ) -> None:
         super().__init__(stop_event, PROCESS_PRIORITY_HIGH, name=name, daemon=True)
         self.detection_queue = detection_queue
@@ -130,6 +149,10 @@ class DetectorRunner(FrigateProcess):
         self.config = config
         self.detector_config = detector_config
         self.outputs: dict = {}
+        self.free_slots_queue = free_slots_queue
+        self.pool_init_lock = pool_init_lock
+        self.pool_initialized = pool_initialized
+        self.num_pool_slots = num_pool_slots
 
     def create_output_shm(self, name: str):
         out_shm = UntrackedSharedMemory(name=f"out-{name}", create=False)
@@ -143,16 +166,36 @@ class DetectorRunner(FrigateProcess):
         object_detector = LocalObjectDetector(detector_config=self.detector_config)
         detector_publisher = ObjectDetectorPublisher()
 
+        _maybe_init_pool(
+            self.free_slots_queue,
+            self.pool_init_lock,
+            self.pool_initialized,
+            self.num_pool_slots,
+        )
+
         for name in self.cameras:
             self.create_output_shm(name)
 
         while not self.stop_event.is_set():
             try:
-                connection_id = self.detection_queue.get(timeout=1)
+                queue_item = self.detection_queue.get(timeout=1)
             except queue.Empty:
                 continue
+
+            # Pool mode: (pool_slot, camera_name) tuple
+            # Serial mode: bare camera_name string
+            if isinstance(queue_item, tuple):
+                input_id, connection_id = queue_item
+                output_id = input_id
+                publish_topic = f"{connection_id}/{input_id}"
+            else:
+                input_id = queue_item
+                connection_id = queue_item
+                output_id = connection_id
+                publish_topic = connection_id
+
             input_frame = frame_manager.get(
-                connection_id,
+                input_id,
                 (
                     1,
                     self.detector_config.model.height,
@@ -162,20 +205,20 @@ class DetectorRunner(FrigateProcess):
             )
 
             if input_frame is None:
-                logger.warning(f"Failed to get frame {connection_id} from SHM")
+                logger.warning(f"Failed to get frame {input_id} from SHM")
                 continue
 
             # detect and send the output
             self.start_time.value = datetime.datetime.now().timestamp()
             detections = object_detector.detect_raw(input_frame)
             duration = datetime.datetime.now().timestamp() - self.start_time.value
-            frame_manager.close(connection_id)
+            frame_manager.close(input_id)
 
-            if connection_id not in self.outputs:
-                self.create_output_shm(connection_id)
+            if output_id not in self.outputs:
+                self.create_output_shm(output_id)
 
-            self.outputs[connection_id]["np"][:] = detections[:]
-            detector_publisher.publish(connection_id)
+            self.outputs[output_id]["np"][:] = detections[:]
+            detector_publisher.publish(publish_topic)
             self.start_time.value = 0.0
 
             self.avg_speed.value = (self.avg_speed.value * 9 + duration) / 10
@@ -195,6 +238,10 @@ class AsyncDetectorRunner(FrigateProcess):
         config: FrigateConfig,
         detector_config: BaseDetectorConfig,
         stop_event: MpEvent,
+        free_slots_queue=None,
+        pool_init_lock=None,
+        pool_initialized=None,
+        num_pool_slots: int = 0,
     ) -> None:
         super().__init__(stop_event, PROCESS_PRIORITY_HIGH, name=name, daemon=True)
         self.detection_queue = detection_queue
@@ -208,6 +255,10 @@ class AsyncDetectorRunner(FrigateProcess):
         self._publisher: ObjectDetectorPublisher | None = None
         self._detector: AsyncLocalObjectDetector | None = None
         self.send_times = deque()
+        self.free_slots_queue = free_slots_queue
+        self.pool_init_lock = pool_init_lock
+        self.pool_initialized = pool_initialized
+        self.num_pool_slots = num_pool_slots
 
     def create_output_shm(self, name: str):
         out_shm = UntrackedSharedMemory(name=f"out-{name}", create=False)
@@ -218,12 +269,20 @@ class AsyncDetectorRunner(FrigateProcess):
         logger.info("Starting Detect Worker Thread")
         while not self.stop_event.is_set():
             try:
-                connection_id = self.detection_queue.get(timeout=1)
+                queue_item = self.detection_queue.get(timeout=1)
             except queue.Empty:
                 continue
 
+            # Pool mode: (pool_slot, camera_name) tuple
+            # Serial mode: bare camera_name string
+            if isinstance(queue_item, tuple):
+                input_id, connection_id = queue_item
+            else:
+                input_id = queue_item
+                connection_id = queue_item
+
             input_frame = self._frame_manager.get(
-                connection_id,
+                input_id,
                 (
                     1,
                     self.detector_config.model.height,
@@ -233,21 +292,38 @@ class AsyncDetectorRunner(FrigateProcess):
             )
 
             if input_frame is None:
-                logger.warning(f"Failed to get frame {connection_id} from SHM")
+                logger.warning(f"Failed to get frame {input_id} from SHM")
                 continue
 
             # mark start time and send to accelerator
+            # Encode routing info as "input_id:connection_id" for result worker
+            routing_id = (
+                f"{input_id}:{connection_id}"
+                if input_id != connection_id
+                else connection_id
+            )
             self.send_times.append(time.perf_counter())
-            self._detector.async_send_input(input_frame, connection_id)
+            self._detector.async_send_input(input_frame, routing_id)
 
     def _result_worker(self) -> None:
         logger.info("Starting Result Worker Thread")
         while not self.stop_event.is_set():
-            connection_id, detections = self._detector.async_receive_output()
+            routing_id, detections = self._detector.async_receive_output()
 
             # Handle timeout case (queue.Empty) - just continue
-            if connection_id is None:
+            if routing_id is None:
                 continue
+
+            # Decode routing: "input_id:connection_id" or bare "connection_id"
+            if ":" in routing_id:
+                input_id, connection_id = routing_id.split(":", 1)
+                output_id = input_id
+                publish_topic = f"{connection_id}/{input_id}"
+            else:
+                input_id = routing_id
+                connection_id = routing_id
+                output_id = connection_id
+                publish_topic = connection_id
 
             if not self.send_times:
                 # guard; shouldn't happen if send/recv are balanced
@@ -256,15 +332,15 @@ class AsyncDetectorRunner(FrigateProcess):
             duration = time.perf_counter() - ts
 
             # release input buffer
-            self._frame_manager.close(connection_id)
+            self._frame_manager.close(input_id)
 
-            if connection_id not in self.outputs:
-                self.create_output_shm(connection_id)
+            if output_id not in self.outputs:
+                self.create_output_shm(output_id)
 
             # write results and publish
             if detections is not None:
-                self.outputs[connection_id]["np"][:] = detections[:]
-            self._publisher.publish(connection_id)
+                self.outputs[output_id]["np"][:] = detections[:]
+            self._publisher.publish(publish_topic)
 
             # update timers
             self.avg_speed.value = (self.avg_speed.value * 9 + duration) / 10
@@ -277,6 +353,13 @@ class AsyncDetectorRunner(FrigateProcess):
         self._publisher = ObjectDetectorPublisher()
         self._detector = AsyncLocalObjectDetector(
             detector_config=self.detector_config, stop_event=self.stop_event
+        )
+
+        _maybe_init_pool(
+            self.free_slots_queue,
+            self.pool_init_lock,
+            self.pool_initialized,
+            self.num_pool_slots,
         )
 
         for name in self.cameras:
@@ -318,6 +401,10 @@ class ObjectDetectProcess:
         config: FrigateConfig,
         detector_config: BaseDetectorConfig,
         stop_event: MpEvent,
+        free_slots_queue=None,
+        pool_init_lock=None,
+        pool_initialized=None,
+        num_pool_slots: int = 0,
     ):
         self.name = name
         self.cameras = cameras
@@ -328,6 +415,10 @@ class ObjectDetectProcess:
         self.config = config
         self.detector_config = detector_config
         self.stop_event = stop_event
+        self.free_slots_queue = free_slots_queue
+        self.pool_init_lock = pool_init_lock
+        self.pool_initialized = pool_initialized
+        self.num_pool_slots = num_pool_slots
         self.start_or_restart()
 
     def stop(self):
@@ -359,6 +450,10 @@ class ObjectDetectProcess:
                 self.config,
                 self.detector_config,
                 self.stop_event,
+                self.free_slots_queue,
+                self.pool_init_lock,
+                self.pool_initialized,
+                self.num_pool_slots,
             )
         else:
             self.detect_process = DetectorRunner(
@@ -370,6 +465,10 @@ class ObjectDetectProcess:
                 self.config,
                 self.detector_config,
                 self.stop_event,
+                self.free_slots_queue,
+                self.pool_init_lock,
+                self.pool_initialized,
+                self.num_pool_slots,
             )
         self.detect_process.start()
 
