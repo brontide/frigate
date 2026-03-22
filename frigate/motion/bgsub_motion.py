@@ -1,4 +1,12 @@
+"""Background-subtractor motion detectors (MOG2, KNN).
+
+Shared base class ``BgSubMotionDetector`` contains all detection logic.
+Concrete subclasses only override ``_create_subtractor()`` to provide the
+specific OpenCV background subtractor instance.
+"""
+
 import logging
+from abc import abstractmethod
 
 import cv2
 import numpy as np
@@ -12,18 +20,25 @@ logger = logging.getLogger(__name__)
 
 
 def _history_from_alpha(frame_alpha: float) -> int:
-    """Derive MOG2 history length from frame_alpha (clamped to [50, 2000])."""
+    """Derive background subtractor history length from frame_alpha (clamped to [50, 2000])."""
     return max(50, min(2000, int(1 / frame_alpha)))
 
 
-class MoG2MotionDetector(MotionDetector):
+class BgSubMotionDetector(MotionDetector):
+    """Base class for OpenCV background-subtractor motion detectors."""
+
+    @abstractmethod
+    def _create_subtractor(self) -> cv2.BackgroundSubtractor:
+        """Create and return the OpenCV background subtractor instance."""
+        ...
+
     def __init__(
         self,
         frame_shape,
         config: MotionConfig,
         fps: int,
         ptz_metrics: PTZMetrics = None,
-        name="mog2",
+        name="bgsub",
         blur_radius=1,
         interpolation=cv2.INTER_NEAREST,
         contrast_frame_history=50,
@@ -37,12 +52,7 @@ class MoG2MotionDetector(MotionDetector):
             config.frame_height * frame_shape[1] // frame_shape[0],
         )
 
-        # MOG2 background subtractor with history derived from frame_alpha
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=_history_from_alpha(config.frame_alpha),
-            varThreshold=config.threshold,
-            detectShadows=True,
-        )
+        self.bg_subtractor = self._create_subtractor()
 
         self.frame_counter = 0
         self.motion_frame_count = 0
@@ -100,7 +110,7 @@ class MoG2MotionDetector(MotionDetector):
         if self.save_images:
             resized_saved = resized_frame.copy()
 
-        # Contrast improvement: normalize per-channel before feeding MOG2
+        # Contrast improvement: normalize per-channel before feeding subtractor
         if self.config.improve_contrast:
             min_value = np.percentile(resized_frame, 4).astype(np.uint8)
             max_value = np.percentile(resized_frame, 96).astype(np.uint8)
@@ -132,7 +142,7 @@ class MoG2MotionDetector(MotionDetector):
         # Apply spatial mask
         fg_mask[self.mask] = 0
 
-        # Threshold at 254 to exclude MOG2 shadow pixels (127) cleanly
+        # Threshold at 254 to exclude shadow pixels (127) cleanly
         thresh = cv2.threshold(fg_mask, 254, 255, cv2.THRESH_BINARY)[1]
 
         # Morphological cleanup: open to remove noise, close to fill holes
@@ -237,14 +247,37 @@ class MoG2MotionDetector(MotionDetector):
         self.mask = np.where(resized_mask == [0])
 
         # Reset background model when mask changes so it relearns the new scene
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=_history_from_alpha(self.config.frame_alpha),
-            varThreshold=self.config.threshold,
-            detectShadows=True,
-        )
+        self.bg_subtractor = self._create_subtractor()
         self.calibrating = True
         self.motion_frame_count = 0
 
     def stop(self) -> None:
         """Stop the motion detector."""
         pass
+
+
+# ---------------------------------------------------------------------------
+# Concrete subtractor implementations
+# ---------------------------------------------------------------------------
+
+
+class MoG2MotionDetector(BgSubMotionDetector):
+    """Motion detector using OpenCV's MOG2 background subtractor."""
+
+    def _create_subtractor(self):
+        return cv2.createBackgroundSubtractorMOG2(
+            history=_history_from_alpha(self.config.frame_alpha),
+            varThreshold=self.config.threshold,
+            detectShadows=True,
+        )
+
+
+class KNNMotionDetector(BgSubMotionDetector):
+    """Motion detector using OpenCV's KNN background subtractor."""
+
+    def _create_subtractor(self):
+        return cv2.createBackgroundSubtractorKNN(
+            history=_history_from_alpha(self.config.frame_alpha),
+            dist2Threshold=self.config.threshold,
+            detectShadows=True,
+        )

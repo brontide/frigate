@@ -1,8 +1,8 @@
 from typing import Tuple
 
 from frigate.config import MotionConfig
+from frigate.motion.bgsub_motion import KNNMotionDetector, MoG2MotionDetector
 from frigate.motion.improved_motion import ImprovedMotionDetector
-from frigate.motion.mog2_motion import MoG2MotionDetector
 
 
 def create_motion_detector(
@@ -16,6 +16,7 @@ def create_motion_detector(
     methods = {
         "improved": ImprovedMotionDetector,
         "mog2": MoG2MotionDetector,
+        "knn": KNNMotionDetector,
     }
     detector_class = methods.get(config.method.value, ImprovedMotionDetector)
     return detector_class(frame_shape, config, fps, name=name, ptz_metrics=ptz_metrics)

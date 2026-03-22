@@ -11,6 +11,7 @@ __all__ = ["MotionConfig", "MotionMethodEnum"]
 class MotionMethodEnum(str, Enum):
     improved = "improved"
     mog2 = "mog2"
+    knn = "knn"
 
 
 class MotionConfig(FrigateBaseModel):
