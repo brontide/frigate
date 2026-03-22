@@ -17,7 +17,7 @@ class FrigateWatchdog(threading.Thread):
         self.stop_event = stop_event
 
     def run(self) -> None:
-        time.sleep(10)
+        time.sleep(30)
         while not self.stop_event.wait(10):
             now = datetime.datetime.now().timestamp()
 
