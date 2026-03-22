@@ -17,6 +17,7 @@ This is a passion project, personal in nature and I would love to get this pulle
 * DO: Maintain comments where appropriate — pythonic code may not require any, but more complex logic should have a brief comment
 * DO: Group and commit changes by function, minimizing interactions between unrelated changes
 * DO: Run `ruff check --fix` and `ruff format` on Python code before committing (see commands below)
+* DO: When adding or changing configuration items, update `MEADOWVIEW_CONFIGURATION.md` and `README.md` to reflect the changes in a follow-up commit after the code commit
 
 ### Branches
 
