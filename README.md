@@ -4,15 +4,18 @@
 
 This fork adds pluggable motion detection and configurable region handling on top of upstream Frigate. All new options are opt-in; the defaults match upstream behaviour.
 
-## MOG2 Motion Detection
+## Background-Subtractor Motion Detection (MOG2 & KNN)
 
-An alternative motion detector based on OpenCV's MOG2 background subtractor. MOG2 is especially good at suppressing hard shadows and wind-blown leaves, which means `threshold` can usually come down compared to the default `improved` method.
+Two alternative motion detectors based on OpenCV background subtractors are available alongside the default `improved` method.
+
+- **MOG2** — A good general-purpose choice, especially for outdoor scenes. It builds a statistical model of the background over time, suppressing hard shadows and wind-blown leaves well. You can often lower `threshold` compared to the default method.
+- **KNN** — Uses more CPU than MOG2 but adapts better to multimodal backgrounds such as rippling water, flickering monitors, or complex indoor lighting. Best used as a targeted option for cameras where MOG2 struggles.
 
 Recommended starting point:
 
 ```yaml
 motion:
-  method: mog2
+  method: mog2   # or knn
   frame_height: 300
   use_motion_region_grid: false
 ```

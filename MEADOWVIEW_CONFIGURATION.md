@@ -11,20 +11,21 @@ All meadow-view options are **opt-in**. When omitted, defaults match upstream Fr
 | | |
 |---|---|
 | **YAML path** | `motion.method` |
-| **Type** | string enum — `improved` \| `mog2` |
+| **Type** | string enum — `improved` \| `mog2` \| `knn` |
 | **Default** | `improved` |
 | **Scope** | global or per-camera |
 
 Selects the motion detection algorithm.
 
 - **`improved`** — The stock Frigate frame-differencing detector. Well-tested and lightweight.
-- **`mog2`** — An alternative based on OpenCV's MOG2 (Mixture of Gaussians) background subtractor. MOG2 builds a statistical model of the background over time, which makes it better at suppressing hard shadows and repetitive motion like wind-blown foliage. Because MOG2 already handles these cases, you can often lower `threshold` compared to the default method.
+- **`mog2`** — Based on OpenCV's MOG2 (Mixture of Gaussians) background subtractor. MOG2 builds a statistical model of the background over time, which makes it a good general-purpose choice for outdoor scenes — it handles hard shadows and repetitive motion like wind-blown foliage well. Because MOG2 already suppresses these cases, you can often lower `threshold` compared to the default method.
+- **`knn`** — Based on OpenCV's KNN (K-Nearest Neighbours) background subtractor. KNN maintains a per-pixel history of recent samples and classifies new frames by distance to those samples, which lets it adapt to multimodal backgrounds (e.g. rippling water, flickering monitors, complex indoor lighting). It uses more CPU than MOG2 but can produce cleaner foreground masks in scenes where the background has multiple stable states. Best suited as a targeted option for cameras where MOG2 struggles.
 
 Changing `method` requires a camera process restart.
 
 ```yaml
 motion:
-  method: mog2
+  method: mog2   # or knn
 ```
 
 ### `region_multiplier`
