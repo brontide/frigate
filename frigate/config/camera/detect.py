@@ -65,3 +65,8 @@ class DetectConfig(FrigateBaseModel):
         default="auto",
         title="Minimum region size: 'auto', 'native', or a pixel value.",
     )
+    parallel_slots: float = Field(
+        default=2.0,
+        title="Pool slot multiplier: slots = ceil(multiplier * num_detectors).",
+        ge=1.0,
+    )

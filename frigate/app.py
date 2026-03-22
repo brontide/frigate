@@ -1,5 +1,6 @@
 import datetime
 import logging
+import math
 import multiprocessing as mp
 import os
 import secrets
@@ -92,6 +93,10 @@ class FrigateApp:
         self.detection_queue: Queue = mp.Queue()
         self.detectors: dict[str, ObjectDetectProcess] = {}
         self.detection_shms: list[mp.shared_memory.SharedMemory] = []
+        self.free_slots_queue: Optional[Queue] = None
+        self.pool_init_lock: mp.Lock = mp.Lock()
+        self.pool_initialized: mp.Value = mp.Value("b", False)
+        self.num_pool_slots: int = 0
         self.log_queue: Queue = mp.Queue()
         self.camera_metrics: DictProxy = self.metrics_manager.dict()
         self.embeddings_metrics: DataProcessorMetrics | None = (
@@ -370,6 +375,33 @@ class FrigateApp:
             self.detection_shms.append(shm_in)
             self.detection_shms.append(shm_out)
 
+        # Create shared pool slots for parallel detection
+        # parallel_slots is a multiplier: slots = ceil(multiplier * num_detectors)
+        num_detectors = len(self.config.detectors)
+        slot_multiplier = self.config.detect.parallel_slots
+        self.num_pool_slots = math.ceil(slot_multiplier * num_detectors)
+        if self.num_pool_slots > 1:
+            self.free_slots_queue = mp.Queue()
+            # Queue starts empty — first detector to finish loading fills it
+            for i in range(self.num_pool_slots):
+                slot_name = f"pool_slot{i}"
+                try:
+                    shm_slot_in = UntrackedSharedMemory(
+                        name=slot_name, create=True, size=largest_frame
+                    )
+                except FileExistsError:
+                    shm_slot_in = UntrackedSharedMemory(name=slot_name)
+                try:
+                    shm_slot_out = UntrackedSharedMemory(
+                        name=f"out-{slot_name}",
+                        create=True,
+                        size=20 * 6 * 4,
+                    )
+                except FileExistsError:
+                    shm_slot_out = UntrackedSharedMemory(name=f"out-{slot_name}")
+                self.detection_shms.append(shm_slot_in)
+                self.detection_shms.append(shm_slot_out)
+
         for name, detector_config in self.config.detectors.items():
             self.detectors[name] = ObjectDetectProcess(
                 name,
@@ -378,6 +410,10 @@ class FrigateApp:
                 self.config,
                 detector_config,
                 self.stop_event,
+                self.free_slots_queue,
+                self.pool_init_lock,
+                self.pool_initialized,
+                self.num_pool_slots,
             )
 
     def start_ptz_autotracker(self) -> None:
@@ -415,6 +451,8 @@ class FrigateApp:
             self.ptz_metrics,
             self.stop_event,
             self.metrics_manager,
+            self.free_slots_queue,
+            self.num_pool_slots,
         )
         self.camera_maintainer.start()
 

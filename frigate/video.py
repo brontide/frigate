@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Queue, Value
 from multiprocessing.synchronize import Event as MpEvent
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 
@@ -618,6 +618,8 @@ class CameraTracker(FrigateProcess):
         region_grid: list[list[dict[str, Any]]],
         stop_event: MpEvent,
         log_config: LoggerConfig | None = None,
+        free_slots_queue: Optional[Queue] = None,
+        num_pool_slots: int = 0,
     ) -> None:
         super().__init__(
             stop_event,
@@ -634,6 +636,8 @@ class CameraTracker(FrigateProcess):
         self.ptz_metrics = ptz_metrics
         self.region_grid = region_grid
         self.log_config = log_config
+        self.free_slots_queue = free_slots_queue
+        self.num_pool_slots = num_pool_slots
 
     def run(self) -> None:
         self.pre_run_setup(self.log_config)
@@ -647,13 +651,28 @@ class CameraTracker(FrigateProcess):
             name=self.config.name,
             ptz_metrics=self.ptz_metrics,
         )
-        object_detector = RemoteObjectDetector(
-            self.config.name,
-            self.labelmap,
-            self.detection_queue,
-            self.model_config,
-            self.stop_event,
-        )
+        if self.free_slots_queue is not None:
+            from frigate.object_detection.pool_detect import (
+                PoolRemoteObjectDetector,
+            )
+
+            object_detector = PoolRemoteObjectDetector(
+                self.config.name,
+                self.labelmap,
+                self.detection_queue,
+                self.model_config,
+                self.stop_event,
+                self.free_slots_queue,
+                self.num_pool_slots,
+            )
+        else:
+            object_detector = RemoteObjectDetector(
+                self.config.name,
+                self.labelmap,
+                self.detection_queue,
+                self.model_config,
+                self.stop_event,
+            )
 
         object_tracker = NorfairTracker(self.config, self.ptz_metrics)
 
@@ -998,18 +1017,33 @@ def process_frames(
                 if obj["id"] in stationary_object_ids
             ]
 
-            for region in regions:
+            if hasattr(object_detector, "detect_parallel") and len(regions) > 0:
+                from frigate.video_mw import detect_regions
+
                 detections.extend(
-                    detect(
+                    detect_regions(
                         camera_config.detect,
                         object_detector,
                         frame,
                         model_config,
-                        region,
+                        regions,
                         camera_config.objects.track,
                         camera_config.objects.filters,
                     )
                 )
+            else:
+                for region in regions:
+                    detections.extend(
+                        detect(
+                            camera_config.detect,
+                            object_detector,
+                            frame,
+                            model_config,
+                            region,
+                            camera_config.objects.track,
+                            camera_config.objects.filters,
+                        )
+                    )
 
             consolidated_detections = reduce_detections(frame_shape, detections)
 

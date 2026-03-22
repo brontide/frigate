@@ -6,6 +6,7 @@ import threading
 from multiprocessing import Queue
 from multiprocessing.managers import DictProxy, SyncManager
 from multiprocessing.synchronize import Event as MpEvent
+from typing import Optional
 
 from frigate.camera import CameraMetrics, PTZMetrics
 from frigate.config import FrigateConfig
@@ -34,6 +35,8 @@ class CameraMaintainer(threading.Thread):
         ptz_metrics: dict[str, PTZMetrics],
         stop_event: MpEvent,
         metrics_manager: SyncManager,
+        free_slots_queue: Optional[Queue] = None,
+        num_pool_slots: int = 0,
     ):
         super().__init__(name="camera_processor")
         self.config = config
@@ -42,6 +45,8 @@ class CameraMaintainer(threading.Thread):
         self.stop_event = stop_event
         self.camera_metrics = camera_metrics
         self.ptz_metrics = ptz_metrics
+        self.free_slots_queue = free_slots_queue
+        self.num_pool_slots = num_pool_slots
         self.frame_manager = SharedMemoryFrameManager()
         self.region_grids: dict[str, list[list[dict[str, int]]]] = {}
         self.update_subscriber = CameraConfigUpdateSubscriber(
@@ -137,6 +142,8 @@ class CameraMaintainer(threading.Thread):
             self.region_grids[name],
             self.stop_event,
             self.config.logger,
+            self.free_slots_queue,
+            self.num_pool_slots,
         )
         self.camera_processes[config.name] = camera_process
         camera_process.start()
