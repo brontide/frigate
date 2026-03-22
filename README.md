@@ -27,6 +27,10 @@ Set `minimum_region: native` under `detect:` to always use the full model input 
 
 Motion regions are now scored by motion area and sorted so the most significant regions are processed first. Overlapping motion and tracked-object regions are aggressively merged, and a deduplication pass removes any region already covered by a larger one. This reduces redundant detector invocations without sacrificing coverage.
 
+## Configuration Reference
+
+See [MEADOWVIEW_CONFIGURATION.md](MEADOWVIEW_CONFIGURATION.md) for the complete configuration reference with all available options, defaults, and usage guidance.
+
 ---
 
 <p align="center">
