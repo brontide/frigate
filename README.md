@@ -1,8 +1,14 @@
 > **This is an unofficial fork of Frigate NVR. It is not affiliated with, endorsed by, or associated with Frigate, Inc. in any way. "Frigate" and the Frigate logo are trademarks of Frigate, Inc.**
 
-# Meadow-View — Motion & Region Enhancements for Frigate
+# Meadow-View — Detection Pipeline Enhancements for Frigate
 
-This fork adds pluggable motion detection and configurable region handling on top of upstream Frigate. All new options are opt-in; the defaults match upstream behaviour.
+Meadow-View is a patchset on top of Frigate NVR that targets three bottlenecks in the stock detection pipeline:
+
+1. **Smarter motion detection** — Pluggable background-subtractor algorithms (MOG2, KNN) replace the default pixel-differencing method with models that adapt to the scene over time, suppressing shadows, wind-blown foliage, and other persistent noise before regions ever reach the detector.
+2. **Better region handling** — Motion and tracked-object regions are scored, merged, and deduplicated so the detector sees fewer, higher-quality crops with proper context. A configurable minimum region size prevents the auto-sizing logic from discarding useful detail for capable models.
+3. **Lower detection latency** — A shared pool of SHM slots allows multiple regions to be in-flight across detectors simultaneously, removing the serial one-region-at-a-time bottleneck that limited throughput.
+
+All new options are opt-in; the defaults match upstream behaviour. See [MEADOWVIEW_CONFIGURATION.md](MEADOWVIEW_CONFIGURATION.md) for the full configuration reference.
 
 ## Background-Subtractor Motion Detection (MOG2 & KNN)
 
@@ -30,9 +36,14 @@ Set `minimum_region: native` under `detect:` to always use the full model input 
 
 Motion regions are now scored by motion area and sorted so the most significant regions are processed first. Overlapping motion and tracked-object regions are aggressively merged, and a deduplication pass removes any region already covered by a larger one. This reduces redundant detector invocations without sacrificing coverage.
 
-## Configuration Reference
+## Parallel Region Detection
 
-See [MEADOWVIEW_CONFIGURATION.md](MEADOWVIEW_CONFIGURATION.md) for the complete configuration reference with all available options, defaults, and usage guidance.
+Detection regions are submitted to a shared pool of SHM slots so multiple regions can be in-flight across detectors simultaneously. This removes the serial bottleneck where each camera had to wait for one region to complete before submitting the next. The pool size is controlled by `detect.parallel_slots` (default `2.0`, meaning `ceil(2.0 × num_detectors)` slots). When only one slot would be created, detection falls back to the upstream serial path.
+
+```yaml
+detect:
+  parallel_slots: 2.5
+```
 
 ---
 

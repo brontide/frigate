@@ -90,6 +90,27 @@ detect:
   minimum_region: native
 ```
 
+### `parallel_slots`
+
+| | |
+|---|---|
+| **YAML path** | `detect.parallel_slots` |
+| **Type** | float |
+| **Range** | ≥ 1.0 |
+| **Default** | `2.0` |
+| **Scope** | global or per-camera |
+
+Multiplier that controls the size of the shared detection pool. The total number of pool slots is `ceil(parallel_slots × num_detectors)`. Each slot is a shared-memory pair (input + output) that allows a camera to submit a detection region without waiting for a previous region to finish.
+
+With the default of `2.0` and a single detector, two pool slots are created — enough for one region to be in-flight while the detector processes another. Increasing this value adds more in-flight capacity, which can help cameras with many simultaneous regions avoid waiting for a free slot. Values above `3.0` are unlikely to improve throughput further.
+
+When `parallel_slots × num_detectors` rounds to 1, no pool is created and detection falls back to the upstream serial path.
+
+```yaml
+detect:
+  parallel_slots: 2.5
+```
+
 ---
 
 ## Region Deduplication
@@ -143,6 +164,7 @@ motion:
 
 detect:
   minimum_region: native
+  parallel_slots: 2.5
 
 ui:
   inference_threshold:
