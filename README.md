@@ -38,7 +38,7 @@ Motion regions are now scored by motion area and sorted so the most significant 
 
 ## Parallel Region Detection
 
-Detection regions are submitted to a shared pool of SHM slots so multiple regions can be in-flight across detectors simultaneously. This removes the serial bottleneck where each camera had to wait for one region to complete before submitting the next. The pool size is controlled by `detect.parallel_slots` (default `2.0`, meaning `ceil(2.0 × num_detectors)` slots). When only one slot would be created, detection falls back to the upstream serial path.
+Detection regions are submitted to a shared pool of SHM slots so multiple regions can be in-flight across detectors simultaneously. This removes the serial bottleneck where each camera had to wait for one region to complete before submitting the next. The pool size is controlled by `detect.parallel_slots` (default `1.001`, meaning `num_detectors + 1` slots). Results are returned inline via ZMQ rather than through shared memory, so slots are freed immediately after inference. When only one slot would be created, detection falls back to the upstream serial path.
 
 ```yaml
 detect:
