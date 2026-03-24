@@ -391,16 +391,7 @@ class FrigateApp:
                     )
                 except FileExistsError:
                     shm_slot_in = UntrackedSharedMemory(name=slot_name)
-                try:
-                    shm_slot_out = UntrackedSharedMemory(
-                        name=f"out-{slot_name}",
-                        create=True,
-                        size=20 * 6 * 4,
-                    )
-                except FileExistsError:
-                    shm_slot_out = UntrackedSharedMemory(name=f"out-{slot_name}")
                 self.detection_shms.append(shm_slot_in)
-                self.detection_shms.append(shm_slot_out)
 
         for name, detector_config in self.config.detectors.items():
             self.detectors[name] = ObjectDetectProcess(

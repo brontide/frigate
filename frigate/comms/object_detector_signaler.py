@@ -58,6 +58,11 @@ class ObjectDetectorPublisher:
         """Publish message."""
         self.socket.send_string(f"{self.topic}{sub_topic}/")
 
+    def publish_with_data(self, sub_topic: str, data: bytes) -> None:
+        """Publish message with binary payload (multipart)."""
+        topic = f"{self.topic}{sub_topic}/"
+        self.socket.send_multipart([topic.encode(), data])
+
     def stop(self) -> None:
         self.socket.close()
         self.context.destroy()

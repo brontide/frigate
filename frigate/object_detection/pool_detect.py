@@ -4,6 +4,10 @@ Uses a global pool of SHM slots so multiple regions (from any camera) can be
 in-flight simultaneously across detectors.  Each pool slot is an independent
 connection_id — detector backends are completely unchanged except for unpacking
 a (pool_slot, camera_name) tuple from the queue instead of a bare string.
+
+Detection results are returned inline via ZMQ multipart messages (480 bytes),
+so pool slots are freed immediately after inference — not held for the
+round-trip back to the camera.
 """
 
 import logging
@@ -25,8 +29,8 @@ class PoolRemoteObjectDetector:
     """Drop-in alternative to RemoteObjectDetector using a shared slot pool.
 
     Cameras acquire free slots from the pool, write tensors, enqueue work items
-    as (pool_slot, camera_name) tuples, and wait for results via ZMQ prefix
-    matching on their camera topic.
+    as (pool_slot, camera_name) tuples, and wait for results via ZMQ multipart
+    messages that carry the detection tensor inline.
     """
 
     def __init__(
@@ -47,11 +51,9 @@ class PoolRemoteObjectDetector:
         self.num_slots = num_slots
         self.fps = EventsPerSecond()
 
-        # Pre-open all pool slot SHMs so we don't open/close per-request
+        # Pre-open all pool slot input SHMs so we don't open/close per-request
         self.pool_np_in: dict[int, np.ndarray] = {}
         self.pool_shm_in: dict[int, UntrackedSharedMemory] = {}
-        self.pool_np_out: dict[int, np.ndarray] = {}
-        self.pool_shm_out: dict[int, UntrackedSharedMemory] = {}
 
         for i in range(num_slots):
             slot_name = f"pool_slot{i}"
@@ -61,11 +63,6 @@ class PoolRemoteObjectDetector:
                 (1, model_config.height, model_config.width, 3),
                 dtype=np.uint8,
                 buffer=shm_in.buf,
-            )
-            shm_out = UntrackedSharedMemory(name=f"out-{slot_name}", create=False)
-            self.pool_shm_out[i] = shm_out
-            self.pool_np_out[i] = np.ndarray(
-                (20, 6), dtype=np.float32, buffer=shm_out.buf
             )
 
         # ZMQ subscriber for this camera — prefix matches all pool slot responses
@@ -85,7 +82,7 @@ class PoolRemoteObjectDetector:
         # Drain stale ZMQ messages
         while True:
             try:
-                self.subscriber.socket.recv_string(flags=zmq.NOBLOCK)
+                self.subscriber.socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
                 break
 
@@ -101,7 +98,7 @@ class PoolRemoteObjectDetector:
             self.pool_np_in[slot_idx][:] = tensor[:]
             self.detection_queue.put((f"pool_slot{slot_idx}", self.name))
 
-        # Wait for all responses
+        # Wait for all responses (results arrive inline via ZMQ multipart)
         pending = set(range(len(acquired_slots)))
         results_by_idx: dict[int, list] = {}
         deadline = time.monotonic() + 10.0
@@ -120,17 +117,21 @@ class PoolRemoteObjectDetector:
                 continue
 
             try:
-                msg = self.subscriber.socket.recv_string(flags=zmq.NOBLOCK)
+                frames = self.subscriber.socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
                 continue
 
-            # Parse pool slot index from message
-            # Format: "object_detector/{camera_name}/pool_slot{idx}/"
+            if len(frames) < 2:
+                continue
+
+            topic = frames[0].decode()
+            raw_detections = np.frombuffer(frames[1], dtype=np.float32).reshape(20, 6)
+
+            # Match topic to an acquired slot
             for i, slot_idx in enumerate(acquired_slots):
-                if i in pending and f"pool_slot{slot_idx}" in msg:
-                    # Read results from pool output SHM
+                if i in pending and f"pool_slot{slot_idx}" in topic:
                     detections = []
-                    for d in self.pool_np_out[slot_idx]:
+                    for d in raw_detections:
                         if d[1] < threshold:
                             break
                         detections.append(
@@ -142,22 +143,11 @@ class PoolRemoteObjectDetector:
                         )
                     results_by_idx[i] = detections
                     pending.discard(i)
-                    # Return slot to pool
-                    self.free_slots.put(slot_idx)
                     self.fps.update()
                     break
 
         if pending:
-            # Release timed-out slots back to the pool. The detector may
-            # still be processing them, which means another camera could
-            # overwrite the input before the detector reads it — but the
-            # result is just a wasted inference (published to our ZMQ topic,
-            # drained as stale on the next call). This avoids slot starvation.
-            for i in pending:
-                self.free_slots.put(acquired_slots[i])
-            logger.warning(
-                f"{self.name}: {len(pending)} pool slots timed out, released"
-            )
+            logger.warning(f"{self.name}: {len(pending)} pool detections timed out")
 
         # Assemble results in submission order
         for i in range(len(acquired_slots)):

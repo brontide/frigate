@@ -214,11 +214,19 @@ class DetectorRunner(FrigateProcess):
             duration = datetime.datetime.now().timestamp() - self.start_time.value
             frame_manager.close(input_id)
 
-            if output_id not in self.outputs:
-                self.create_output_shm(output_id)
-
-            self.outputs[output_id]["np"][:] = detections[:]
-            detector_publisher.publish(publish_topic)
+            if isinstance(queue_item, tuple):
+                # Pool mode: free slot immediately, send results inline via ZMQ
+                slot_idx = int(input_id.removeprefix("pool_slot"))
+                self.free_slots_queue.put(slot_idx)
+                detector_publisher.publish_with_data(
+                    publish_topic, detections.tobytes()
+                )
+            else:
+                # Serial mode: write to output SHM, publish topic-only
+                if output_id not in self.outputs:
+                    self.create_output_shm(output_id)
+                self.outputs[output_id]["np"][:] = detections[:]
+                detector_publisher.publish(publish_topic)
             self.start_time.value = 0.0
 
             self.avg_speed.value = (self.avg_speed.value * 9 + duration) / 10
@@ -334,13 +342,25 @@ class AsyncDetectorRunner(FrigateProcess):
             # release input buffer
             self._frame_manager.close(input_id)
 
-            if output_id not in self.outputs:
-                self.create_output_shm(output_id)
-
-            # write results and publish
-            if detections is not None:
-                self.outputs[output_id]["np"][:] = detections[:]
-            self._publisher.publish(publish_topic)
+            if input_id != connection_id:
+                # Pool mode: free slot immediately, send results inline via ZMQ
+                slot_idx = int(input_id.removeprefix("pool_slot"))
+                self.free_slots_queue.put(slot_idx)
+                if detections is not None:
+                    self._publisher.publish_with_data(
+                        publish_topic, detections.tobytes()
+                    )
+                else:
+                    self._publisher.publish_with_data(
+                        publish_topic, np.zeros((20, 6), dtype=np.float32).tobytes()
+                    )
+            else:
+                # Serial mode: write to output SHM, publish topic-only
+                if output_id not in self.outputs:
+                    self.create_output_shm(output_id)
+                if detections is not None:
+                    self.outputs[output_id]["np"][:] = detections[:]
+                self._publisher.publish(publish_topic)
 
             # update timers
             self.avg_speed.value = (self.avg_speed.value * 9 + duration) / 10
