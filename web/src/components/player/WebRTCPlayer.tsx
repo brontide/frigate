@@ -52,6 +52,7 @@ export default function WebRtcPlayer({
   // camera states
 
   const pcRef = useRef<RTCPeerConnection | undefined>();
+  const wsRef = useRef<WebSocket | undefined>();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [bufferTimeout, setBufferTimeout] = useState<NodeJS.Timeout>();
   const videoLoadTimeoutRef = useRef<NodeJS.Timeout>();
@@ -130,6 +131,7 @@ export default function WebRtcPlayer({
 
       pcRef.current = await aPc;
       const ws = new WebSocket(wsURL);
+      wsRef.current = ws;
 
       ws.addEventListener("open", () => {
         pcRef.current?.addEventListener("icecandidate", (ev) => {
@@ -183,6 +185,10 @@ export default function WebRtcPlayer({
     connect(aPc);
 
     return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = undefined;
+      }
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = undefined;
