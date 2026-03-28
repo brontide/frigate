@@ -7,7 +7,7 @@ import {
 } from "@/api/ws";
 import { CameraConfig, FrigateConfig } from "@/types/frigateConfig";
 import { MotionData, ReviewSegment } from "@/types/review";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTimelineUtils } from "./use-timeline-utils";
 import { AudioDetection, ObjectType } from "@/types/ws";
 import useDeepMemo from "./use-deep-memo";
@@ -77,14 +77,10 @@ export function useCameraActivity(
   const { payload: event } = useFrigateEvents();
   const updatedEvent = useDeepMemo(event);
 
-  const handleSetObjects = useCallback(
-    (newObjects: ObjectType[]) => {
-      if (!isEqual(objects, newObjects)) {
-        setObjects(newObjects);
-      }
-    },
-    [objects],
-  );
+  // Use ref for objects to break the effect dependency chain.
+  // Without this, objects→handleSetObjects→effect deps creates 2-3 re-runs per event.
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
 
   useEffect(() => {
     if (!updatedEvent) {
@@ -95,10 +91,12 @@ export function useCameraActivity(
       return;
     }
 
+    const currentObjects = objectsRef.current;
     const updatedEventIndex =
-      objects?.findIndex((obj) => obj.id === updatedEvent.after.id) ?? -1;
+      currentObjects?.findIndex((obj) => obj.id === updatedEvent.after.id) ??
+      -1;
 
-    let newObjects: ObjectType[] = [...(objects ?? [])];
+    let newObjects: ObjectType[] = [...(currentObjects ?? [])];
 
     if (updatedEvent.type === "end") {
       if (updatedEventIndex !== -1) {
@@ -117,11 +115,9 @@ export function useCameraActivity(
             score: updatedEvent.after.score,
             sub_label: updatedEvent.after.sub_label?.[0] ?? "",
           };
-          newObjects = [...(objects ?? []), newActiveObject];
+          newObjects = [...(currentObjects ?? []), newActiveObject];
         }
       } else {
-        const newObjects = [...(objects ?? [])];
-
         let label = updatedEvent.after.label;
 
         if (updatedEvent.after.sub_label) {
@@ -134,14 +130,20 @@ export function useCameraActivity(
           }
         }
 
-        newObjects[updatedEventIndex].label = label;
-        newObjects[updatedEventIndex].stationary =
-          updatedEvent.after.stationary;
+        newObjects[updatedEventIndex] = {
+          ...newObjects[updatedEventIndex],
+          label,
+          stationary: updatedEvent.after.stationary,
+        };
       }
     }
 
-    handleSetObjects(newObjects);
-  }, [attributeLabels, camera, updatedEvent, objects, handleSetObjects]);
+    if (!isEqual(currentObjects, newObjects)) {
+      setObjects(newObjects);
+    }
+    // objectsRef avoids including objects in deps, preventing re-run cascades
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updatedEvent, attributeLabels, camera]);
 
   // determine if camera is offline
 
