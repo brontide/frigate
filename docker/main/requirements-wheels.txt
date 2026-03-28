@@ -1,25 +1,25 @@
-aiofiles == 24.1.*
+aiofiles >= 24.1
 click == 8.1.*
 # FastAPI
-aiohttp == 3.12.*
+aiohttp >= 3.12
 starlette == 0.47.*
 starlette-context == 0.4.*
-fastapi[standard-no-fastapi-cloud-cli] == 0.116.*
-uvicorn == 0.35.*
-slowapi == 0.1.*
+fastapi[standard-no-fastapi-cloud-cli] >= 0.116
+uvicorn >= 0.35
+slowapi >= 0.1
 joserfc == 1.2.*
-cryptography == 44.0.*
+cryptography >= 45
 pathvalidate == 3.3.*
 markupsafe == 3.0.*
 python-multipart == 0.0.20
 # Classification Model Training
-tensorflow == 2.19.* ; platform_machine == 'aarch64'
-tensorflow-cpu == 2.19.* ; platform_machine == 'x86_64'
+tensorflow >= 2.19 ; platform_machine == 'aarch64'
+tensorflow-cpu >= 2.19 ; platform_machine == 'x86_64'
 # General
 mypy == 1.6.1
-onvif-zeep-async == 4.0.*
+onvif-zeep-async >= 4
 paho-mqtt == 2.1.*
-pandas == 2.2.*
+pandas >= 2.2
 peewee == 3.17.*
 peewee_migrate == 1.14.*
 psutil == 7.1.*
@@ -31,16 +31,19 @@ ruamel.yaml == 0.18.*
 tzlocal == 5.2
 requests == 2.33.*
 types-requests == 2.33.*
-norfair == 2.3.*
+#norfair == 2.3.*
+#norfair[video] @ git+https://github.com/brontide/norfair-numpy2.git@numpy2-support
+norfair[video] @ https://github.com/brontide/norfair-numpy2/releases/download/v2.3.0/norfair-2.3.0-py3-none-any.whl
 setproctitle == 1.3.*
 ws4py == 0.5.*
 unidecode == 1.3.*
 titlecase == 2.4.*
 # Image Manipulation
-numpy == 1.26.*
-opencv-python-headless == 4.11.*
-opencv-contrib-python == 4.11.*
-scipy == 1.16.*
+#numpy == 1.26.*
+numpy >= 2
+opencv-python-headless >= 4.11
+opencv-contrib-python >= 4.11
+scipy >= 1.16
 # OpenVino & ONNX
 openvino == 2025.3.*
 onnxruntime == 1.24.*
@@ -55,7 +58,7 @@ py-vapid == 1.9.*
 pywebpush == 2.0.*
 # alpr
 pyclipper == 1.3.*
-shapely == 2.0.*
+shapely == 2.1.*
 rapidfuzz==3.12.*
 # HailoRT Wheels
 appdirs==1.4.*
@@ -72,14 +75,15 @@ verboselogs==1.7.*
 virtualenv==20.17.*
 prometheus-client == 0.21.*
 # TFLite
-tflite_runtime @ https://github.com/frigate-nvr/TFlite-builds/releases/download/v2.17.1/tflite_runtime-2.17.1-cp311-cp311-linux_x86_64.whl; platform_machine == 'x86_64'
-tflite_runtime @ https://github.com/feranick/TFlite-builds/releases/download/v2.17.1/tflite_runtime-2.17.1-cp311-cp311-linux_aarch64.whl; platform_machine == 'aarch64'
+#tflite_runtime @ https://github.com/frigate-nvr/TFlite-builds/releases/download/v2.17.1/tflite_runtime-2.17.1-cp311-cp311-linux_x86_64.whl; platform_machine == 'x86_64'
+#tflite_runtime @ https://github.com/feranick/TFlite-builds/releases/download/v2.17.1/tflite_runtime-2.17.1-cp311-cp311-linux_aarch64.whl; platform_machine == 'aarch64'
+ai-edge-litert
 # audio transcription
 sherpa-onnx==1.12.*
 faster-whisper==1.1.*
 librosa==0.11.*
 soundfile==0.13.*
 # DeGirum detector
-degirum == 0.16.*
+degirum >= 1.2
 # Memory profiling
 memray == 1.15.*

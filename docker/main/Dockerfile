@@ -264,6 +264,7 @@ RUN wget -q https://bootstrap.pypa.io/get-pip.py -O get-pip.py \
     && python3 get-pip.py "pip"
 
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/deps/wheels \
+    pip3 install "numpy>=2,<3" && \
     pip3 install -U /deps/wheels/*.whl
 
 # Install MemryX runtime (requires libgomp (OpenMP) in the final docker image)
