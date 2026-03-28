@@ -11,9 +11,12 @@ from frigate.detectors.detection_api import DetectionApi
 from frigate.detectors.detector_config import BaseDetectorConfig, ModelTypeEnum
 
 try:
-    from tflite_runtime.interpreter import Interpreter, load_delegate
+    from ai_edge_litert.interpreter import Interpreter, load_delegate
 except ModuleNotFoundError:
-    from tensorflow.lite.python.interpreter import Interpreter, load_delegate
+    try:
+        from tflite_runtime.interpreter import Interpreter, load_delegate
+    except ModuleNotFoundError:
+        from tensorflow.lite.python.interpreter import Interpreter, load_delegate
 
 logger = logging.getLogger(__name__)
 
