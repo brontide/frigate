@@ -174,6 +174,7 @@ export function SummaryTimeline({
 
       return () => {
         content.removeEventListener("scroll", handleScroll);
+        observer.current?.disconnect();
       };
     }
   }, [
