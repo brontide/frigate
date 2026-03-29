@@ -19,6 +19,10 @@ This is a passion project, personal in nature and I would love to get this pulle
 * DO: Run `ruff check --fix` and `ruff format` on Python code before committing (see commands below)
 * DO: When adding or changing configuration items, update `MEADOWVIEW_CONFIGURATION.md` and `README.md` to reflect the changes in a follow-up commit after the code commit
 
+### Local Testing
+
+The Frigate container name is `frigate`. You can use `docker exec frigate <command>` to run commands inside the running container (e.g., test Python snippets). The unauthenticated API is available on the host at port `15000` (mapped to container port 5000 via NGINX), so API endpoints can be verified with `curl http://localhost:15000/api/...`.
+
 ### Branches
 
 meadow-watch: Tracks upstream/master 
